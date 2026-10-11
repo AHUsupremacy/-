@@ -1,53 +1,190 @@
 # 北极熊哨兵仿真与导航
 
-本仓库收录已在 Ubuntu 22.04、ROS 2 Humble、Gazebo Fortress 环境中完成编译并由用户验证仿真导航可运行的源码。`src/` 是 15 个固定提交的 ROS 仓库（29 个 ROS 包），`third_party/` 是 Livox-SDK2 和 small_gicp 的源码。解压原始 ZIP 后完成的 ROS2 manifest、单 MID360 仿真、实机参数以及 small_gicp 构建适配已包含在这些源码中。
+本仓库包含已验证的单 MID360 仿真导航源码：Ubuntu 22.04、ROS 2 Humble、Gazebo Fortress，15 个 ROS 仓库共 29 个包，以及 Livox-SDK2 和 small_gicp 源码。用户已在原机器完成全部构建，并验证仿真和导航可运行；实机尚未验证。
 
-原始仓库的许可文件保留在各自目录。Livox-SDK2 固定在提交 `08f523c930b2f0ba1e98a6afaa8d7476bf479908`（该提交的 CHANGELOG 为 1.4.3，无同名正式 tag），livox_ros_driver2 固定在 `4a1def929e5b59c7a8122d19fce6efba581ce9f7`。其他源码的固定版本见各目录原始内容和部署记录。
+**新机器不能只 `git clone` 就启动：需要安装系统依赖、编译，并单独提供 PCD。** 以下教程从 Ubuntu 22.04 x86_64 桌面环境开始，不依赖原作者的用户名或绝对路径。建议内存至少 16 GB、有可用 OpenGL 图形环境和足够磁盘空间，首次编译并行度设为 2。
 
-## 地图数据
+## 1. 安装 ROS 2 Humble
 
-按上传要求，本仓库**不包含 PCD 文件**。运行 `rmuc_2025` 导航前，需单独将已验证的 `rmuc_2025.pcd` 放在：
+打开 Bash 终端，退出 Conda/其他 Python 虚拟环境。已有 `/opt/ros/humble/setup.bash` 的机器可跳过 ROS 软件源配置，但仍需安装后续依赖。以下 sudo 命令修改系统，由使用者执行。
+
+```bash
+sudo apt update
+sudo apt install -y locales software-properties-common curl gnupg git ca-certificates
+sudo locale-gen en_US en_US.UTF-8
+sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+export LANG=en_US.UTF-8
+sudo add-apt-repository -y universe
+sudo install -d -m 0755 /usr/share/keyrings
+curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /tmp/beijixiong-ros.key
+sudo install -m 0644 /tmp/beijixiong-ros.key /usr/share/keyrings/ros-archive-keyring.gpg
+printf 'deb [arch=%s signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu jammy main\n' "$(dpkg --print-architecture)" | sudo tee /etc/apt/sources.list.d/ros2.list >/dev/null
+sudo apt update
+sudo apt install -y ros-humble-desktop python3-rosdep python3-colcon-common-extensions python3-vcstool
+source /opt/ros/humble/setup.bash
+```
+
+如果已有 ROS 软件源，不要再建立重复条目。ROS 官方安装说明：<https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html>。
+
+## 2. 安装编译、仿真和导航依赖
+
+```bash
+sudo apt install -y \
+  build-essential cmake pkg-config python3-dev python3-pip python3-yaml \
+  python3-numpy python3-opencv libeigen3-dev libpcl-dev libopencv-dev \
+  libgoogle-glog-dev libunwind-dev libomp-dev libapr1-dev \
+  ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-slam-toolbox \
+  ros-humble-pcl-ros ros-humble-pcl-conversions ros-humble-joy \
+  ros-humble-cv-bridge ros-humble-camera-info-manager ros-humble-image-transport \
+  ros-humble-eigen3-cmake-module ros-humble-joint-state-publisher \
+  ros-humble-robot-state-publisher ros-humble-xacro \
+  ros-humble-ament-cmake-auto ros-humble-ros-gz-sim ros-humble-ros-gz-bridge \
+  ignition-fortress libignition-gazebo6-dev libignition-msgs8-dev libignition-transport11-dev
+/usr/bin/python3 -m pip install --user 'xmacro==1.2.1'
+/usr/bin/python3 -c 'from xmacro.xmacro4sdf import XMLMacro4sdf; print("xmacro OK")'
+```
+
+若 apt 找不到 Fortress 包，配置 OSRF 软件源后重新执行上述 apt 安装命令：
+
+```bash
+curl -fsSL https://packages.osrfoundation.org/gazebo.gpg -o /tmp/beijixiong-gazebo.gpg
+sudo install -m 0644 /tmp/beijixiong-gazebo.gpg /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
+printf 'deb [arch=%s signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] https://packages.osrfoundation.org/gazebo/ubuntu-stable jammy main\n' "$(dpkg --print-architecture)" | sudo tee /etc/apt/sources.list.d/gazebo-stable.list >/dev/null
+sudo apt update
+```
+
+可选网页控制依赖（基础导航不需要）：
+
+```bash
+/usr/bin/python3 -m pip install --user \
+  'Flask==3.1.3' 'Flask-SocketIO==5.6.1' \
+  'Flask-Cors==6.0.5' 'python-engineio==4.14.0'
+```
+
+## 3. 克隆源码与检查依赖
+
+```bash
+cd ~
+git clone https://github.com/zhangxuesong-06/-.git beijixiong
+cd beijixiong
+source scripts/env.sh
+```
+
+若 `~/beijixiong` 已存在，换一个空目录名即可。`env.sh` 自动计算仓库根目录为 `$PB_ROOT`，并创建项目内 runtime 目录。以后每个新终端先 source 该文件。
+
+所有 17 份源码已在仓库内，**无需下载原 ZIP、导入 dependencies.repos 或初始化上游子模块**。`src/` 下各仓库并列；`third_party/` 下的两个库单独构建。
+
+初始化 rosdep（已初始化的机器跳过 `sudo rosdep init`）：
+
+```bash
+sudo rosdep init
+rosdep update
+rosdep install --from-paths "$PB_ROOT/src" --ignore-src --rosdistro humble -y
+```
+
+rosdep 会安装 manifest 声明的依赖；第 2 节还补充了上游 manifest 未声明的依赖。遇到网络/软件源错误应先解决，不要把失败当作安装完成。
+
+## 4. 构建并安装两个基础库
+
+源码、构建文件在仓库内，最终头文件和库安装到系统 `/usr/local`。不能跳过编译直接执行安装：克隆仓库不包含构建产物。
+
+```bash
+cmake -S "$PB_ROOT/third_party/Livox-SDK2" \
+  -B "$PB_ROOT/build-deps/Livox-SDK2" \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+cmake --build "$PB_ROOT/build-deps/Livox-SDK2" --parallel 2
+sudo cmake --install "$PB_ROOT/build-deps/Livox-SDK2"
+
+cmake -S "$PB_ROOT/third_party/small_gicp" \
+  -B "$PB_ROOT/build-deps/small_gicp" \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+  -DCMAKE_INSTALL_LIBDIR=lib \
+  -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+  -DBUILD_BENCHMARKS=OFF -DBUILD_PYTHON_BINDINGS=OFF
+cmake --build "$PB_ROOT/build-deps/small_gicp" --parallel 2
+sudo cmake --install "$PB_ROOT/build-deps/small_gicp"
+sudo ldconfig
+```
+
+每步成功后再进行下一步。检查依赖，`ldd` 不应出现 `not found`：
+
+```bash
+pkg-config --modversion ignition-gazebo6 ignition-msgs8 ignition-transport11 apr-1
+ls /usr/local/include/livox_lidar_api.h \
+   /usr/local/lib/liblivox_lidar_sdk_shared.so \
+   /usr/local/lib/cmake/small_gicp/small_gicp-config.cmake
+ldd /usr/local/lib/liblivox_lidar_sdk_shared.so
+ldd /usr/local/lib/libsmall_gicp.so
+```
+
+Livox-SDK2 固定提交为 `08f523c930b2f0ba1e98a6afaa8d7476bf479908`，CHANGELOG 标为 1.4.3，但没有同名正式 tag；不要替换成此前不匹配的 v1.2.5。完整固定版本见 [SOURCE_VERSIONS.md](SOURCE_VERSIONS.md)。
+
+## 5. 放入 PCD，再编译 ROS 工作区
+
+按仓库拥有者要求，`.gitignore` 排除了所有 PCD，**本仓库不分发点云地图，也没有自动下载地址**。向项目拥有者取得已验证的 `rmuc_2025.pcd`，在构建前放到：
 
 ```text
 src/pb2025_sentry_nav/pb2025_nav_bringup/pcd/simulation/rmuc_2025.pcd
 ```
 
-其他场地的 PCD 同样须单独提供，并与二维栅格地图匹配。缺少 PCD 时可构建源码，但不能直接运行依赖该 PCD 的重定位导航。
+原验证文件 SHA256 为 `5e1bda92eacc6bc338b278a7032dfa49cc1a8eb1d1fee83d09d1d726750d717d`。可用 `sha256sum` 核对。运行 rmul_2025 则需相应的 rmul_2025.pcd。二维栅格地图已随源码收录。
 
-## 构建
-
-在 Ubuntu 22.04 + ROS 2 Humble 上安装 ROS 导航、Gazebo Fortress、APR/OpenMP 和 Python xmacro 等依赖。详细包名见 [INSTALL_DEPENDENCIES.md](INSTALL_DEPENDENCIES.md)；该文件记录了原验证机的绝对路径，新机器应替换为自己的克隆路径。源码应放在同一工作目录下的 `src/` 和 `third_party/`，无需再次嵌套。
-
-先在当前工作目录构建 Livox-SDK2 和 small_gicp，并由系统管理员安装到 `/usr/local`：
+缺少 PCD 仍可构建和启动 Gazebo，但无法直接进行该地图的重定位导航。构建后才添加 PCD 时，可以在导航命令中用 `prior_pcd_file:=/绝对路径/rmuc_2025.pcd` 显式指定，或重新构建 pb2025_nav_bringup。
 
 ```bash
-export PB_ROOT="$PWD"
-cmake -S "$PB_ROOT/third_party/Livox-SDK2" -B "$PB_ROOT/build-deps/Livox-SDK2" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
-cmake --build "$PB_ROOT/build-deps/Livox-SDK2" --parallel 2
-cmake -S "$PB_ROOT/third_party/small_gicp" -B "$PB_ROOT/build-deps/small_gicp" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_PYTHON_BINDINGS=OFF
-cmake --build "$PB_ROOT/build-deps/small_gicp" --parallel 2
-sudo cmake --install "$PB_ROOT/build-deps/Livox-SDK2"
-sudo cmake --install "$PB_ROOT/build-deps/small_gicp"
-sudo ldconfig
-```
-
-然后构建 ROS 工作区：
-
-```bash
-source "$PB_ROOT/scripts/env.sh"
-colcon --log-base "$PB_ROOT/log" build --base-paths "$PB_ROOT/src" --build-base "$PB_ROOT/build" --install-base "$PB_ROOT/install" --symlink-install --parallel-workers 2 --cmake-args -DCMAKE_BUILD_TYPE=Release -DROS_EDITION=ROS2 -DDISTRO_ROS=humble -DPython3_EXECUTABLE=/usr/bin/python3 -DPYTHON_EXECUTABLE=/usr/bin/python3 -DBUILD_TESTING=OFF
+cd "$PB_ROOT"
+colcon list --base-paths src
+colcon --log-base "$PB_ROOT/log" build \
+  --base-paths "$PB_ROOT/src" \
+  --build-base "$PB_ROOT/build" \
+  --install-base "$PB_ROOT/install" \
+  --symlink-install --parallel-workers 2 \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release \
+  -DROS_EDITION=ROS2 -DDISTRO_ROS=humble \
+  -DPython3_EXECUTABLE=/usr/bin/python3 \
+  -DPYTHON_EXECUTABLE=/usr/bin/python3 -DBUILD_TESTING=OFF
 source "$PB_ROOT/install/setup.bash"
 ```
 
-`scripts/env.sh` 将构建与运行临时数据指向工作目录内的 `runtime/`。如该目录尚不存在，先执行 `mkdir -p runtime/{tmp,cache,config,data,ros,ros_logs,colcon}`。
+应识别并完成 29 个 ROS 包。部分包提示未使用 `ROS_EDITION`、`DISTRO_ROS` 等 CMake 参数属于警告；以是否有 Failed/Aborted 包判断构建是否成功。不要运行 Livox 原始 `build.sh`，以免清空工作区构建目录。
 
-## 已验证的仿真启动
+## 6. 启动仿真与导航
 
-分别在两个终端运行，终端都需要先 `source scripts/env.sh` 和 `source install/setup.bash`：
+下面假设克隆到 `~/beijixiong`；若使用其他路径，替换第一行的目录。终端 A：
 
 ```bash
+cd ~/beijixiong
+source scripts/env.sh
+source install/setup.bash
 ros2 launch rmu_gazebo_simulator bringup_sim.launch.py
+```
+
+保持 Gazebo 播放，等待机器人生成。终端 B：
+
+```bash
+cd ~/beijixiong
+source scripts/env.sh
+source install/setup.bash
 ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py
 ```
 
-第二条命令使用默认 `rmuc_2025` 地图，必须先放入相应 PCD。实机迁移仍处于规划阶段，参见 [HARDWARE_MIGRATION.md](HARDWARE_MIGRATION.md)；当前仿真验证不等于实机已经验证。
+默认是 `world:=rmuc_2025`、`namespace:=red_standard_robot1`、`slam:=False`、`use_sim_time:=True`。确认 RViz 点云与地图对齐，必要时用 2D Pose Estimate 设置初始位姿，再用 Nav2 Goal 选择附近空旷位置。停止时在相应终端按 Ctrl+C。
+
+## 7. 已有适配与排错
+
+- 单 MID360 仿真：移除 RPLIDAR 实例及对应桥接，保留点云和 IMU。
+- Livox：已包含 ROS2 package.xml；实机 xfer_format=1；没有应用旧 SDK 兼容补丁。
+- 重定位：使用 C++17 和安装的 small_gicp::small_gicp，不再在线拉取 master。
+- 模型：移除 stock joint_state_publisher 不支持的零值 offset_timestamp。
+- 找不到 ROS 包：每个新终端都要 source scripts/env.sh 和 install/setup.bash。
+- Python 导入异常：退出 Conda，使用 `/usr/bin/python3`；不要混用 ROS1 环境。
+- 无点云/仿真不前进：确认 Gazebo 已播放，检查 `/clock` 和 `/red_standard_robot1/livox/lidar`。
+- 地图加载失败：检查 PCD 文件、地图名称和启动参数；PCD 不在 Git 仓库中。
+- 内存不足：将两个库的 `--parallel`、ROS 的 `--parallel-workers` 和 `CMAKE_BUILD_PARALLEL_LEVEL` 都改为 1。
+- 新场地建图仍需适配：当前固定版本 pointcloud_to_laserscan 没有实现导航配置中的 intensity 过滤。已验证的已有地图导航不代表该 SLAM 功能已修复。
+
+## 实机范围与许可
+
+实机目标为 NUC13、Ubuntu 22.04 x86、单 MID360；网络、雷达安装外参、底盘 ROS1 到 ROS2 接口与实地地图尚需配置，详见 [HARDWARE_MIGRATION.md](HARDWARE_MIGRATION.md)。实机配置中的 IP 和机器人几何是示例，不能把仿真成功当作实机验收。
+
+各上游项目许可保留在各目录的 LICENSE/NOTICE 中。本仓库不为所有第三方代码重新指定统一许可。构建产物、日志、原 ZIP、PCD 和部署私钥不上传。
