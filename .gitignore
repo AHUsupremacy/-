@@ -1,0 +1,21 @@
+# Build and runtime output
+/build/
+/build-deps/
+/install/
+/log/
+/runtime/
+/verification/
+/zip/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+CMakeCache.txt
+CMakeFiles/
+
+# Maps are distributed separately from this source repository.
+*.pcd
+
+# Local credentials and deployment keys
+.github-deploy/
+*.pem
+*.key
