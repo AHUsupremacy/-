@@ -1,6 +1,6 @@
 # 北极熊哨兵仿真与导航
 
-本仓库包含已验证的单 MID360 仿真导航源码：Ubuntu 22.04、ROS 2 Humble、Gazebo Fortress，15 个 ROS 仓库共 29 个包，以及 Livox-SDK2 和 small_gicp 源码。用户已在原机器完成全部构建，并验证仿真和导航可运行；实机尚未验证。
+本仓库包含单 MID360 仿真导航源码：Ubuntu 22.04、ROS 2 Humble、Gazebo Fortress，15 个上游 ROS 仓库和一个简易决策树包，共 30 个 ROS 包，以及 Livox-SDK2 和 small_gicp 源码。仿真导航和决策节点已运行验证；实机尚未验证。
 
 **新机器不能只 `git clone` 就启动：需要安装系统依赖、编译，并单独提供 PCD。** 以下教程从 Ubuntu 22.04 x86_64 桌面环境开始，不依赖原作者的用户名或绝对路径。建议内存至少 16 GB、有可用 OpenGL 图形环境和足够磁盘空间，首次编译并行度设为 2。
 
@@ -146,7 +146,7 @@ colcon --log-base "$PB_ROOT/log" build \
 source "$PB_ROOT/install/setup.bash"
 ```
 
-应识别并完成 29 个 ROS 包。部分包提示未使用 `ROS_EDITION`、`DISTRO_ROS` 等 CMake 参数属于警告；以是否有 Failed/Aborted 包判断构建是否成功。不要运行 Livox 原始 `build.sh`，以免清空工作区构建目录。
+应识别并完成 30 个 ROS 包。部分包提示未使用 `ROS_EDITION`、`DISTRO_ROS` 等 CMake 参数属于警告；以是否有 Failed/Aborted 包判断构建是否成功。不要运行 Livox 原始 `build.sh`，以免清空工作区构建目录。
 
 ## 6. 启动仿真与导航
 
@@ -169,6 +169,43 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py
 ```
 
 默认是 `world:=rmuc_2025`、`namespace:=red_standard_robot1`、`slam:=False`、`use_sim_time:=True`。确认 RViz 点云与地图对齐，必要时用 2D Pose Estimate 设置初始位姿，再用 Nav2 Goal 选择附近空旷位置。停止时在相应终端按 Ctrl+C。
+
+### 简易决策树
+
+决策包根据裁判血量选择两个 `map` 坐标目标：`remain_hp > 50` 前往点一，`remain_hp <= 50` 前往点二。Nav2 仍负责路径规划、避障和执行。
+
+先在 RViz 中记录两个目标点。以下命令清空旧记录并启动记录模式：
+
+```bash
+cd ~/beijixiong
+bash scripts/start_sim_decision.sh mode:=record reset:=true
+```
+
+在 RViz 工具栏额外添加标准 `rviz_default_plugins/SetGoal` 工具，将其 Topic 设为 `/red_standard_robot1/decision/record_goal`，依次拖出点一和点二的朝向。这个工具只向记录节点发布位姿；现有 Nav2 Goal 工具和 RViz 配置均不需要修改，也不要用现有 Nav2 Goal 工具做点位记录。记录文件位于 `$PB_ROOT/runtime/decision_goals.json`。
+
+记录完成后，在另一个终端用测试血量启动决策：
+
+```bash
+cd ~/beijixiong
+bash scripts/start_sim_decision.sh mode:=decision hp_source:=test
+```
+
+测试节点默认发布 `100/100`，因此机器人前往点一。可在第三个终端切换为 `40/100` 验证点二：
+
+```bash
+cd ~/beijixiong
+source scripts/env.sh
+source install/setup.bash
+ros2 param set /red_standard_robot1/mock_robot_status remain_hp 40
+```
+
+验证真实仿真裁判血量时，先退出测试决策进程，再运行：
+
+```bash
+bash scripts/start_sim_decision.sh mode:=decision hp_source:=referee
+```
+
+决策状态可通过 `ros2 topic echo /red_standard_robot1/decision/state` 查看。记录模式和决策模式不要同时运行。
 
 ## 7. 已有适配与排错
 

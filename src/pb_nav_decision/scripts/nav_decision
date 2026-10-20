@@ -1,0 +1,5 @@
+#!/usr/bin/python3
+from pb_nav_decision.nav_decision import main
+
+if __name__ == '__main__':
+    main()

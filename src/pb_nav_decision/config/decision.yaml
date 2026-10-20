@@ -1,0 +1,14 @@
+/**:
+  ros__parameters:
+    # > 50 selects target_one; <= 50 selects target_two.
+    hp_threshold: 50
+    global_frame: map
+    # Set by the launch file in decision mode. Empty keeps legacy test targets.
+    goal_file: ''
+    # Example coordinates used only when goal_file is empty.
+    # [x in metres, y in metres, yaw in radians]
+    target_one: [2.0, 0.0, 0.0]
+    target_two: [0.5, 0.0, 0.0]
+    navigate_action: navigate_to_pose
+    tick_period: 0.2
+    retry_period: 3.0
