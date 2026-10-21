@@ -1,6 +1,6 @@
 # 北极熊哨兵仿真与导航
 
-本仓库包含单 MID360 仿真导航源码：Ubuntu 22.04、ROS 2 Humble、Gazebo Fortress，15 个上游 ROS 仓库、项目自有的 `pb_nav_decision` 包，共 30 个 ROS 包，以及 Livox-SDK2 和 small_gicp 源码。仿真导航和简易决策功能已运行验证；实机自主导航尚未验证。
+本仓库包含单 MID360 仿真导航源码：Ubuntu 22.04、ROS 2 Humble、Gazebo Fortress，15 个上游 ROS 仓库、项目自有的 `pb_nav_decision` 与 `pb_chassis_serial` 包，以及 Livox-SDK2 和 small_gicp 源码。仿真导航和简易决策功能已运行验证；实机雷达收发与驱动退出已有 GMK 短时验证记录，当前整合版本的整车定位导航仍需验收。
 
 **新机器不能只 `git clone` 就启动：需要安装系统依赖、编译，并单独提供 PCD。** 以下教程从 Ubuntu 22.04 x86_64 桌面环境开始，不依赖原作者的用户名或绝对路径。建议内存至少 16 GB、有可用 OpenGL 图形环境和足够磁盘空间，首次编译并行度设为 2。
 
@@ -65,7 +65,7 @@ sudo apt update
 
 ```bash
 cd ~
-git clone https://github.com/zhangxuesong-06/-.git beijixiong
+git clone https://github.com/AHUsupremacy/-.git beijixiong
 cd ~/beijixiong
 source scripts/env.sh
 mkdir -p "$PB_ROOT/runtime"/{tmp,cache,config,data,ros,ros_logs,colcon}
@@ -125,6 +125,13 @@ ldd /usr/local/lib/libsmall_gicp.so
 ```
 
 Livox-SDK2 固定提交为 `08f523c930b2f0ba1e98a6afaa8d7476bf479908`，CHANGELOG 标为 1.4.3，但没有同名正式 tag；不要替换成此前不匹配的 v1.2.5。完整固定版本见 [SOURCE_VERSIONS.md](SOURCE_VERSIONS.md)。
+
+Linux 共享 SDK 只导出公共 C API，内部 spdlog/fmt 符号保持私有，避免与 ROS 日志库混用而在退出时崩溃。
+更新此修复后应重新构建并安装 SDK，再构建 ROS 驱动，不能只复制 launch 文件。安装后检查版本和导出接口：
+
+```bash
+python3 scripts/verify_livox_sdk_exports.py /usr/local/lib/liblivox_lidar_sdk_shared.so
+```
 
 ## 5. 放入 PCD，再编译 ROS 工作区
 
@@ -236,8 +243,10 @@ bash scripts/start_sim_decision.sh mode:=decision hp_source:=referee
 - 单 MID360 仿真：移除 RPLIDAR 实例及对应桥接，保留点云和 IMU。
 - 雷达倒装适配：仿真 MID360 安装在 `gimbal_yaw` 上，姿态绕 X 轴旋转 180 度；定位与点云转换参数使用对应的云台参考系。
 - 点云强度过滤：`pointcloud_to_laserscan` 支持 `min_intensity`/`max_intensity`，仿真配置用高度强度阈值过滤地面点。
-- Livox：已包含 ROS2 package.xml；实机 xfer_format=1；没有应用旧 SDK 兼容补丁。
+- Livox：包含并跟踪 ROS2 package.xml；实机 xfer_format=1；保留 SDK 1.4.3，隔离共享库内部日志符号。
 - 重定位：使用 C++17 和安装的 small_gicp::small_gicp，不再在线拉取 master。
+- GMK 仿真修复：点云快照时间、扫描周期和 Point-LIO 批量观测权重修正见 [GMK_CHANGES.md](GMK_CHANGES.md)。快照模式仅在仿真配置开启。
+- GICP 调度：单项后台匹配任务，待处理点云只保留最新帧；重新设置初始位姿后丢弃旧任务结果。
 - GICP 诊断：不收敛日志会报告点数、内点数、迭代次数、误差和初末位姿，并限制为每 5 秒最多一条；这是诊断输出，不改变配准算法或收敛判定。
 - 模型：移除 stock joint_state_publisher 不支持的零值 offset_timestamp。
 - 找不到 ROS 包：每个新终端都要 source scripts/env.sh 和 install/setup.bash。
@@ -251,8 +260,11 @@ bash scripts/start_sim_decision.sh mode:=decision hp_source:=referee
 
 实机目标为华硕 NUC 13、Ubuntu 22.04 x86_64、单 MID360。雷达 JSON 当前写入电脑接收 IP `192.168.1.50` 和雷达 IP `192.168.1.121`；NUC 网卡地址与雷达 TF 外参仍须现场核对。实机迁移步骤见 [HARDWARE_MIGRATION.md](HARDWARE_MIGRATION.md)。
 
-实机 Nav2 最终输出 `geometry_msgs/msg/Twist` 到命名空间下的 `cmd_vel`。工作区有 `rmoss_base` UART 通用工具和云台示例节点，但没有把导航 `cmd_vel` 转成当前电控协议的已验证底盘桥接；实机移动前还需确认或实现对应的 ROS 通信节点。
+实机 Nav2 最终输出 `geometry_msgs/msg/Twist` 到命名空间下的 `cmd_vel`，由项目维护的 `pb_chassis_serial` 桥接到电控串口；实机 launch 默认关闭该桥接。`rmoss_base` 的云台示例不是导航底盘驱动。接入实车前需核对协议、速度方向和模式位；当前桥接在命令超时后发送 `vx=0, vy=0, wz=3.14, spin_mode=1`，需要与电控确认自转与停止的语义。
 
 当前实机 YAML 的 `xfer_format` 为 1、Point-LIO `lidar_type` 为 1、`scan_line` 为 4。`pointcloud_to_laserscan` 已支持 `min_intensity`/`max_intensity`，实机阈值为 0.1–2.0；调参后须复核地面、斜坡和低矮障碍物是否被保留。仿真雷达模型位于 `src/pb2025_robot_description/resource/xmacro/simulation_robot.sdf.xmacro`，固定在 `gimbal_yaw`，姿态绕 X 轴旋转 180 度。
+
+GMK 增量部署的无线开机修复单独见 [scripts/gmk_network/README.md](scripts/gmk_network/README.md)，
+不会随 ROS 编译自动应用。迁移范围与验证记录见 [GMK_LIDAR_NETWORK_CHANGES.md](GMK_LIDAR_NETWORK_CHANGES.md)。
 
 各上游项目许可保留在各目录的 LICENSE/NOTICE 中。本仓库不为所有第三方代码重新指定统一许可。构建产物、日志、原 ZIP、PCD 和部署私钥不上传。

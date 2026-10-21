@@ -26,4 +26,9 @@
 
 `src/pb_nav_decision` 是本项目维护的决策树包，不是单独的上游仓库；它随本仓库提交历史管理。它根据裁判状态的 `remain_hp` 在两个记录的 `map` 目标间切换，具体流程见 [README.md](README.md)。
 
+`src/pb_chassis_serial` 是主分支引入的底盘串口桥接包，同样随本仓库提交历史管理。
+
 以上提交号用于标识第三方源码来源。工作区对这些源码包含集成配置和适配；各目录不是 Git 子模块。
+
+SDK 仍以上表的 1.4.3 源码为基准，Linux 共享库新增公共 C API 导出表，隔离内部日志符号；
+未降级或引入另一份 SDK。增量改动与验证范围见 `GMK_LIDAR_NETWORK_CHANGES.md`。
