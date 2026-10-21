@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 # Copyright 2021 Zhenpeng Ge
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
