@@ -170,6 +170,23 @@ ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py
 
 默认是 `world:=rmuc_2025`、`namespace:=red_standard_robot1`、`slam:=False`、`use_sim_time:=True`。确认 RViz 点云与地图对齐，必要时用 2D Pose Estimate 设置初始位姿，再用 Nav2 Goal 选择附近空旷位置。停止时在相应终端按 Ctrl+C。
 
+没有先验地图、需要现场在线建图时，启动 SLAM 模式。该模式由 `slam_toolbox` 在线生成地图，并关闭依赖先验点云的 small_gicp 重定位：
+
+```bash
+cd ~/beijixiong
+source scripts/env.sh
+source install/setup.bash
+ros2 launch pb2025_nav_bringup rm_navigation_simulation_launch.py slam:=True
+```
+
+建图后可将当前二维地图保存到运行目录（不进入 Git）：
+
+```bash
+mkdir -p "$PB_ROOT/runtime/maps"
+ros2 run nav2_map_server map_saver_cli -t /red_standard_robot1/map \
+  -f "$PB_ROOT/runtime/maps/site"
+```
+
 ### 简易决策树
 
 决策包根据裁判血量选择两个 `map` 坐标目标：`remain_hp > 50` 前往点一，`remain_hp <= 50` 前往点二。Nav2 仍负责路径规划、避障和执行。
@@ -210,6 +227,8 @@ bash scripts/start_sim_decision.sh mode:=decision hp_source:=referee
 ## 7. 已有适配与排错
 
 - 单 MID360 仿真：移除 RPLIDAR 实例及对应桥接，保留点云和 IMU。
+- 雷达倒装适配：仿真 MID360 安装在 `gimbal_yaw` 上，姿态绕 X 轴旋转 180 度；定位与点云转换参数使用对应的云台参考系。
+- 点云强度过滤：`pointcloud_to_laserscan` 支持 `min_intensity`/`max_intensity`，仿真配置用高度强度阈值过滤地面点。
 - Livox：已包含 ROS2 package.xml；实机 xfer_format=1；没有应用旧 SDK 兼容补丁。
 - 重定位：使用 C++17 和安装的 small_gicp::small_gicp，不再在线拉取 master。
 - 模型：移除 stock joint_state_publisher 不支持的零值 offset_timestamp。
@@ -218,7 +237,7 @@ bash scripts/start_sim_decision.sh mode:=decision hp_source:=referee
 - 无点云/仿真不前进：确认 Gazebo 已播放，检查 `/clock` 和 `/red_standard_robot1/livox/lidar`。
 - 地图加载失败：检查 PCD 文件、地图名称和启动参数；PCD 不在 Git 仓库中。
 - 内存不足：将两个库的 `--parallel`、ROS 的 `--parallel-workers` 和 `CMAKE_BUILD_PARALLEL_LEVEL` 都改为 1。
-- 新场地建图仍需适配：当前固定版本 pointcloud_to_laserscan 没有实现导航配置中的 intensity 过滤。已验证的已有地图导航不代表该 SLAM 功能已修复。
+- 无先验地图测试使用 `slam:=True` 在线建图；地图仅保存在本地 `runtime/maps`，PCD 和运行地图均不进入仓库。
 
 ## 实机范围与许可
 

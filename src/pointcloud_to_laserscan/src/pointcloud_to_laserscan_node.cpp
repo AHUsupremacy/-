@@ -40,7 +40,9 @@
 
 #include "pointcloud_to_laserscan/pointcloud_to_laserscan_node.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -49,6 +51,7 @@
 #include <utility>
 
 #include "sensor_msgs/point_cloud2_iterator.hpp"
+#include "sensor_msgs/msg/point_field.hpp"
 #include "tf2_sensor_msgs/tf2_sensor_msgs.hpp"
 #include "tf2_ros/create_timer_ros.h"
 
@@ -66,6 +69,10 @@ PointCloudToLaserScanNode::PointCloudToLaserScanNode(const rclcpp::NodeOptions &
     "queue_size", static_cast<int>(std::thread::hardware_concurrency()));
   min_height_ = this->declare_parameter("min_height", std::numeric_limits<double>::min());
   max_height_ = this->declare_parameter("max_height", std::numeric_limits<double>::max());
+  min_intensity_ =
+    this->declare_parameter("min_intensity", std::numeric_limits<double>::lowest());
+  max_intensity_ =
+    this->declare_parameter("max_intensity", std::numeric_limits<double>::max());
   angle_min_ = this->declare_parameter("angle_min", -M_PI);
   angle_max_ = this->declare_parameter("angle_max", M_PI);
   angle_increment_ = this->declare_parameter("angle_increment", M_PI / 180.0);
@@ -175,11 +182,36 @@ void PointCloudToLaserScanNode::cloudCallback(
     }
   }
 
+  const auto intensity_field = std::find_if(
+    cloud_msg->fields.begin(), cloud_msg->fields.end(), [](const sensor_msgs::msg::PointField & field) {
+      return field.name == "intensity" && field.datatype == sensor_msgs::msg::PointField::FLOAT32;
+    });
+  std::unique_ptr<sensor_msgs::PointCloud2ConstIterator<float>> iter_intensity;
+  if (intensity_field != cloud_msg->fields.end()) {
+    iter_intensity = std::make_unique<sensor_msgs::PointCloud2ConstIterator<float>>(
+      *cloud_msg, "intensity");
+  } else if (
+    min_intensity_ > std::numeric_limits<double>::lowest() ||
+    max_intensity_ < std::numeric_limits<double>::max()) {
+    RCLCPP_WARN_ONCE(
+      this->get_logger(), "Intensity filtering is configured, but the input cloud has no FLOAT32 "
+      "intensity field; skipping intensity filtering");
+  }
+
   // Iterate through pointcloud
   for (sensor_msgs::PointCloud2ConstIterator<float> iter_x(*cloud_msg, "x"),
     iter_y(*cloud_msg, "y"), iter_z(*cloud_msg, "z");
     iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z)
   {
+    if (iter_intensity) {
+      const float intensity = **iter_intensity;
+      ++(*iter_intensity);
+      if (
+        !std::isfinite(intensity) || intensity < min_intensity_ || intensity > max_intensity_) {
+        continue;
+      }
+    }
+
     if (std::isnan(*iter_x) || std::isnan(*iter_y) || std::isnan(*iter_z)) {
       RCLCPP_DEBUG(
         this->get_logger(),
