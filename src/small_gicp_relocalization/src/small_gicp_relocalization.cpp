@@ -152,6 +152,7 @@ void SmallGicpRelocalizationNode::performRegistration()
     return;
   }
 
+  const size_t accumulated_point_count = accumulated_cloud_->size();
   source_ = small_gicp::voxelgrid_sampling_omp<
     pcl::PointCloud<pcl::PointXYZ>, pcl::PointCloud<pcl::PointCovariance>>(
     *accumulated_cloud_, registered_leaf_size_);
@@ -174,7 +175,19 @@ void SmallGicpRelocalizationNode::performRegistration()
   if (result.converged) {
     result_t_ = previous_result_t_ = result.T_target_source;
   } else {
-    RCLCPP_WARN(this->get_logger(), "GICP did not converge.");
+    const Eigen::Vector3d init_rpy = previous_result_t_.rotation().eulerAngles(0, 1, 2);
+    const Eigen::Vector3d result_rpy = result.T_target_source.rotation().eulerAngles(0, 1, 2);
+    RCLCPP_WARN_THROTTLE(
+      this->get_logger(), *this->get_clock(), 5000,
+      "GICP did not converge: accumulated=%zu source=%zu target=%zu inliers=%zu "
+      "iterations=%zu error=%.6f init_xyz=[%.3f %.3f %.3f] init_rpy=[%.3f %.3f %.3f] "
+      "result_xyz=[%.3f %.3f %.3f] result_rpy=[%.3f %.3f %.3f]",
+      accumulated_point_count, source_->size(), target_->size(), result.num_inliers,
+      result.iterations, result.error, previous_result_t_.translation().x(),
+      previous_result_t_.translation().y(), previous_result_t_.translation().z(), init_rpy.x(),
+      init_rpy.y(), init_rpy.z(), result.T_target_source.translation().x(),
+      result.T_target_source.translation().y(), result.T_target_source.translation().z(),
+      result_rpy.x(), result_rpy.y(), result_rpy.z());
   }
 
   accumulated_cloud_->clear();

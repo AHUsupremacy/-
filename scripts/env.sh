@@ -1,6 +1,5 @@
 # Source this file before building or running the workspace.
 export PB_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-mkdir -p "$PB_ROOT/runtime"/{tmp,cache,config,data,ros,ros_logs,colcon}
 export TMPDIR="$PB_ROOT/runtime/tmp"
 export XDG_CACHE_HOME="$PB_ROOT/runtime/cache"
 export XDG_CONFIG_HOME="$PB_ROOT/runtime/config"

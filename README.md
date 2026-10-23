@@ -1,6 +1,6 @@
 # 北极熊哨兵仿真与导航
 
-本仓库包含单 MID360 仿真导航源码：Ubuntu 22.04、ROS 2 Humble、Gazebo Fortress，15 个上游 ROS 仓库和一个简易决策树包，共 30 个 ROS 包，以及 Livox-SDK2 和 small_gicp 源码。仿真导航和决策节点已运行验证；实机尚未验证。
+本仓库包含单 MID360 仿真导航源码：Ubuntu 22.04、ROS 2 Humble、Gazebo Fortress，15 个上游 ROS 仓库、项目自有的 `pb_nav_decision` 包，共 30 个 ROS 包，以及 Livox-SDK2 和 small_gicp 源码。仿真导航和简易决策功能已运行验证；实机自主导航尚未验证。
 
 **新机器不能只 `git clone` 就启动：需要安装系统依赖、编译，并单独提供 PCD。** 以下教程从 Ubuntu 22.04 x86_64 桌面环境开始，不依赖原作者的用户名或绝对路径。建议内存至少 16 GB、有可用 OpenGL 图形环境和足够磁盘空间，首次编译并行度设为 2。
 
@@ -66,11 +66,12 @@ sudo apt update
 ```bash
 cd ~
 git clone https://github.com/zhangxuesong-06/-.git beijixiong
-cd beijixiong
+cd ~/beijixiong
 source scripts/env.sh
+mkdir -p "$PB_ROOT/runtime"/{tmp,cache,config,data,ros,ros_logs,colcon}
 ```
 
-若 `~/beijixiong` 已存在，换一个空目录名即可。`env.sh` 自动计算仓库根目录为 `$PB_ROOT`，并创建项目内 runtime 目录。以后每个新终端先 source 该文件。
+若 `~/beijixiong` 已存在，换一个空目录名即可。`scripts/env.sh` 设置 `$PB_ROOT` 和运行时环境变量；当前脚本本身不创建 runtime 目录，所以新克隆后需执行上面的 `mkdir` 一次。以后每个新终端先 source 该文件。
 
 所有 17 份源码已在仓库内，**无需下载原 ZIP、导入 dependencies.repos 或初始化上游子模块**。`src/` 下各仓库并列；`third_party/` 下的两个库单独构建。
 
@@ -84,29 +85,35 @@ rosdep install --from-paths "$PB_ROOT/src" --ignore-src --rosdistro humble -y
 
 rosdep 会安装 manifest 声明的依赖；第 2 节还补充了上游 manifest 未声明的依赖。遇到网络/软件源错误应先解决，不要把失败当作安装完成。
 
-## 4. 构建并安装两个基础库
+## 4. 一键构建
 
-源码、构建文件在仓库内，最终头文件和库安装到系统 `/usr/local`。不能跳过编译直接执行安装：克隆仓库不包含构建产物。
+仓库内的 `scripts/build_all.sh` 会依次编译并安装 Livox-SDK2、small_gicp，再用正确的 ROS 2 Humble 参数构建全部 ROS 包。无需单独运行 Livox 的 `build.sh`，也无需手动编译这两个库：
 
 ```bash
-cmake -S "$PB_ROOT/third_party/Livox-SDK2" \
-  -B "$PB_ROOT/build-deps/Livox-SDK2" \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
-cmake --build "$PB_ROOT/build-deps/Livox-SDK2" --parallel 2
-sudo cmake --install "$PB_ROOT/build-deps/Livox-SDK2"
-
-cmake -S "$PB_ROOT/third_party/small_gicp" \
-  -B "$PB_ROOT/build-deps/small_gicp" \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
-  -DCMAKE_INSTALL_LIBDIR=lib \
-  -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF \
-  -DBUILD_BENCHMARKS=OFF -DBUILD_PYTHON_BINDINGS=OFF
-cmake --build "$PB_ROOT/build-deps/small_gicp" --parallel 2
-sudo cmake --install "$PB_ROOT/build-deps/small_gicp"
-sudo ldconfig
+cd "$PB_ROOT"
+bash scripts/build_all.sh
 ```
 
-每步成功后再进行下一步。检查依赖，`ldd` 不应出现 `not found`：
+脚本会把两个库安装到系统 `/usr/local`，因此会请求 sudo 权限。它默认使用 Release 编译和 2 路并行；内存较少时可显式降低并行度：
+
+```bash
+BUILD_JOBS=1 COLCON_JOBS=1 bash scripts/build_all.sh
+```
+
+如果此前在同一目录使用过其他构建方式，导致符号链接与普通目录冲突，可显式清理生成目录后再构建：
+
+```bash
+bash scripts/build_all.sh --clean
+```
+
+`--clean` 只删除工作区内的 `build/`、`install/` 和 `log/`，不会删除源码、PCD 或 `/usr/local` 中已安装的库。脚本结束后，每个新终端仍需执行：
+
+```bash
+source "$PB_ROOT/scripts/env.sh"
+source "$PB_ROOT/install/setup.bash"
+```
+
+脚本内部使用的安装检查命令如下；`ldd` 输出不应包含 `not found`：
 
 ```bash
 pkg-config --modversion ignition-gazebo6 ignition-msgs8 ignition-transport11 apr-1
@@ -231,6 +238,7 @@ bash scripts/start_sim_decision.sh mode:=decision hp_source:=referee
 - 点云强度过滤：`pointcloud_to_laserscan` 支持 `min_intensity`/`max_intensity`，仿真配置用高度强度阈值过滤地面点。
 - Livox：已包含 ROS2 package.xml；实机 xfer_format=1；没有应用旧 SDK 兼容补丁。
 - 重定位：使用 C++17 和安装的 small_gicp::small_gicp，不再在线拉取 master。
+- GICP 诊断：不收敛日志会报告点数、内点数、迭代次数、误差和初末位姿，并限制为每 5 秒最多一条；这是诊断输出，不改变配准算法或收敛判定。
 - 模型：移除 stock joint_state_publisher 不支持的零值 offset_timestamp。
 - 找不到 ROS 包：每个新终端都要 source scripts/env.sh 和 install/setup.bash。
 - Python 导入异常：退出 Conda，使用 `/usr/bin/python3`；不要混用 ROS1 环境。
@@ -241,6 +249,10 @@ bash scripts/start_sim_decision.sh mode:=decision hp_source:=referee
 
 ## 实机范围与许可
 
-实机目标为 NUC13、Ubuntu 22.04 x86、单 MID360；网络、雷达安装外参、底盘 ROS1 到 ROS2 接口与实地地图尚需配置，详见 [HARDWARE_MIGRATION.md](HARDWARE_MIGRATION.md)。实机配置中的 IP 和机器人几何是示例，不能把仿真成功当作实机验收。
+实机目标为华硕 NUC 13、Ubuntu 22.04 x86_64、单 MID360。雷达 JSON 当前写入电脑接收 IP `192.168.1.50` 和雷达 IP `192.168.1.121`；NUC 网卡地址与雷达 TF 外参仍须现场核对。实机迁移步骤见 [HARDWARE_MIGRATION.md](HARDWARE_MIGRATION.md)。
+
+实机 Nav2 最终输出 `geometry_msgs/msg/Twist` 到命名空间下的 `cmd_vel`。工作区有 `rmoss_base` UART 通用工具和云台示例节点，但没有把导航 `cmd_vel` 转成当前电控协议的已验证底盘桥接；实机移动前还需确认或实现对应的 ROS 通信节点。
+
+当前实机 YAML 的 `xfer_format` 为 1、Point-LIO `lidar_type` 为 1、`scan_line` 为 4。`pointcloud_to_laserscan` 已支持 `min_intensity`/`max_intensity`，实机阈值为 0.1–2.0；调参后须复核地面、斜坡和低矮障碍物是否被保留。仿真雷达模型位于 `src/pb2025_robot_description/resource/xmacro/simulation_robot.sdf.xmacro`，固定在 `gimbal_yaw`，姿态绕 X 轴旋转 180 度。
 
 各上游项目许可保留在各目录的 LICENSE/NOTICE 中。本仓库不为所有第三方代码重新指定统一许可。构建产物、日志、原 ZIP、PCD 和部署私钥不上传。
