@@ -74,18 +74,23 @@ source install/setup.bash
 ros2 launch pb2025_nav_bringup rm_navigation_reality_launch.py \
   namespace:=red_standard_robot1 \
   slam:=True use_sim_time:=False \
-  use_robot_state_pub:=True use_composition:=False
+  use_robot_state_pub:=True use_composition:=False \
+  use_chassis_serial:=True \
+  chassis_serial_port:=/dev/ttyACM0 \
+  chassis_serial_baudrate:=1152000
 ```
 
 这组参数适用于没有先验地图且由此 launch 发布模型 TF 的独立测试。确认机器人 TF 已由其他来源发布后，将 `use_robot_state_pub` 设为 `False`。有先验地图时改用 `slam:=False`，并确保 `map:=...` 和 `prior_pcd_file:=...` 指向同一场地、坐标一致的地图与点云。
 
-Nav2 的速度经平滑和 `fake_vel_transform` 转换后发布到 namespace 下的 `cmd_vel`，类型为 `geometry_msgs/msg/Twist`，具体话题为 `/red_standard_robot1/cmd_vel`。该话题只是 ROS 速度输出；它不会直接驱动串口电控板。
+Nav2 的速度经平滑和 `fake_vel_transform` 转换后发布到 namespace 下的 `cmd_vel`，类型为 `geometry_msgs/msg/Twist`，具体话题为 `/red_standard_robot1/cmd_vel`。启用 `use_chassis_serial:=True` 后，`pb_chassis_serial` 订阅该话题并以 50 Hz 发送电控协议：`FA FB 21 0D`、三个小端 `float32` 速度和 `spin_mode` 字节。ROS 的 `linear.y` 左正会转换为电控协议的右正；收到新速度时使用 `spin_mode=1`，指令超过 0.25 秒未更新时发送自动模式零速，节点退出时发送 `spin_mode=0` 零速。
+
+电控回传的 `FA FB 42 0C` 速度帧会发布为 `/red_standard_robot1/chassis/actual_velocity`（`geometry_msgs/msg/TwistStamped`），用于诊断。该回传目前不替代 Point-LIO 的里程计输入，也不直接闭合 Nav2 的定位回路。
 
 ## 5. 底盘通信边界
 
-工作区包含 `rmoss_base` 的 UART 通用传输代码和 `SimpleRobotBaseNode` 示例，但此示例订阅的是 `cmd_gimbal`，发送云台角度示例协议，并监听模式字节；它没有把导航的 `cmd_vel` 转为本车底盘协议。UART 示例还固定使用 `/dev/ttyUSB0`、115200 baud，与目前调试器枚举出的 `/dev/ttyACM0` 不是同一配置。
+工作区还包含 `rmoss_base` 的 UART 通用传输代码和 `SimpleRobotBaseNode` 示例；该示例订阅的是 `cmd_gimbal`，发送云台角度示例协议，固定使用 `/dev/ttyUSB0`、115200 baud，不要把它当作导航底盘驱动。导航底盘使用上面单独的 `pb_chassis_serial` 桥接，当前默认串口为 `/dev/ttyACM0`、1152000 baud。
 
-因此，实车运动前需要确认现有电控协议对应的 ROS 通信节点或实现匹配的桥接，再核验它订阅 `cmd_vel` 的名称、消息类型、坐标约定、速度单位以及掉线/底盘断电后的行为。不要把 `rmoss_base` 示例节点误当成已接入的导航底盘驱动。
+首次接入实车时，先只启动桥接并检查打开串口和回传话题，再启动完整导航。确认电控处于允许自动控制的状态后，才在低速、可立即断电的场地发送目标；不要同时运行其他程序占用同一个串口。
 
 ## 验收顺序
 
@@ -95,4 +100,4 @@ Nav2 的速度经平滑和 `fake_vel_transform` 转换后发布到 namespace 下
 4. 确认电控桥接后，先检查速度话题，再在受控场地验证低速方向、旋转和停驶行为。
 5. RViz 目标导航通过后，再接入决策节点和真实血量输入；持续运行至少 7 分钟，并覆盖预期的底盘临时断电场景。
 
-本仓库不包含已验证的实机底盘 `cmd_vel` 协议桥接，也未完成 NUC 上的实机导航验收。
+本仓库包含基于当前电控协议的实机底盘 `cmd_vel` 协议桥接；NUC 上的完整实机导航仍需按上述顺序验收。

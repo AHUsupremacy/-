@@ -45,6 +45,9 @@ def generate_launch_description():
     rviz_config_file = LaunchConfiguration("rviz_config_file")
     use_robot_state_pub = LaunchConfiguration("use_robot_state_pub")
     use_rviz = LaunchConfiguration("use_rviz")
+    use_chassis_serial = LaunchConfiguration("use_chassis_serial")
+    chassis_serial_port = LaunchConfiguration("chassis_serial_port")
+    chassis_serial_baudrate = LaunchConfiguration("chassis_serial_baudrate")
 
     # Declare the launch arguments
     declare_namespace_cmd = DeclareLaunchArgument(
@@ -133,6 +136,24 @@ def generate_launch_description():
         "use_rviz", default_value="True", description="Whether to start RVIZ"
     )
 
+    declare_use_chassis_serial_cmd = DeclareLaunchArgument(
+        "use_chassis_serial",
+        default_value="False",
+        description="Whether to bridge the final cmd_vel to the real chassis UART",
+    )
+
+    declare_chassis_serial_port_cmd = DeclareLaunchArgument(
+        "chassis_serial_port",
+        default_value="/dev/ttyACM0",
+        description="UART device used by the real chassis bridge",
+    )
+
+    declare_chassis_serial_baudrate_cmd = DeclareLaunchArgument(
+        "chassis_serial_baudrate",
+        default_value="1152000",
+        description="UART baud rate used by the real chassis bridge",
+    )
+
     # Create our own temporary YAML files that include substitutions
 
     configured_params = ParameterFile(
@@ -164,6 +185,24 @@ def generate_launch_description():
         output="screen",
         namespace=namespace,
         parameters=[configured_params],
+    )
+
+    chassis_serial_node = Node(
+        condition=IfCondition(use_chassis_serial),
+        package="pb_chassis_serial",
+        executable="chassis_serial_bridge",
+        name="chassis_serial_bridge",
+        namespace=namespace,
+        output="screen",
+        parameters=[
+            {
+                "port": chassis_serial_port,
+                "baudrate": chassis_serial_baudrate,
+                "command_topic": "cmd_vel",
+                "feedback_topic": "chassis/actual_velocity",
+                "feedback_frame_id": "base_footprint",
+            }
+        ],
     )
 
     rviz_cmd = IncludeLaunchDescription(
@@ -216,10 +255,14 @@ def generate_launch_description():
     ld.add_action(declare_use_robot_state_pub_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_use_respawn_cmd)
+    ld.add_action(declare_use_chassis_serial_cmd)
+    ld.add_action(declare_chassis_serial_port_cmd)
+    ld.add_action(declare_chassis_serial_baudrate_cmd)
 
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_robot_state_publisher_cmd)
     ld.add_action(start_livox_ros_driver2_node)
+    ld.add_action(chassis_serial_node)
     ld.add_action(bringup_cmd)
     ld.add_action(joy_teleop_cmd)
     ld.add_action(rviz_cmd)
