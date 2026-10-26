@@ -27,6 +27,7 @@ COMMAND_LENGTH = 17
 FEEDBACK_LENGTH = 16
 
 
+
 def _clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
 
@@ -203,7 +204,7 @@ class ChassisSerialBridge(Node):
             frame = self._make_frame(*self._last_cmd, 1)
             mode = 1
         else:
-            frame = self._make_frame(0.0, 0.0, 0.0, 1)
+            frame = self._make_frame(0.0, 0.0, 3.14, 1)
             mode = 1
             if now - self._last_stale_log > 2.0:
                 self.get_logger().warning(
