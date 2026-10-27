@@ -29,7 +29,8 @@ NM_READY=$(((NM_READY_US + 999999) / 1000000))
 
 # Any connection (client or AP) active on this interface?
 # NB: "nmcli con" reports type 802-11-wireless, not "wifi"; use the device state.
-if nmcli -t -f DEVICE,STATE device 2>/dev/null | grep -q "^${IF}:connected"; then
+# nmcli translates state labels; keep the parsed output independent of locale.
+if LC_ALL=C nmcli -t -f DEVICE,STATE device 2>/dev/null | grep -q "^${IF}:connected"; then
   exit 0
 fi
 

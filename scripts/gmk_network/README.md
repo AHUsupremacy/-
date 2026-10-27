@@ -15,15 +15,19 @@ sudo python3 scripts/gmk_network/fast_wifi_boot.py --apply
 sudo python3 scripts/gmk_network/fix_network_boot_order.py
 ```
 
-- watchdog 改为从 NetworkManager 就绪后计算 120 秒宽限；已有客户端连接或兜底热点时不抢占。
+- watchdog 改为从 NetworkManager 就绪后计算 120 秒宽限；固定 nmcli 的语言环境，已有客户端连接或兜底热点时不抢占。
 - Netplan 只给 enp3s0 设置 optional，不改变原来的 IP、网关、DNS，原网口仍工作。
 - 屏蔽 networkd 的全局开机等待，保留 NetworkManager-wait-online。仅 disable 不够，
   因为 Netplan 会通过 systemd generator 再次拉起该等待服务。
 - 实机雷达启动在 ROS launch 内单独检查网口与接收 IP，避免依赖全局开机等待。
 
 脚本会备份到 `/var/backups/gmk-network/`，不重启网络、不切换当前 Wi-Fi、不自动重启机器。
-正常关闭仿真、导航和雷达驱动后，再由使用者安排重启。恢复屏蔽设置可用对应
-`boot-order-*/restore.sh`，执行后下次启动可能再次等待 120 秒。
+正常关闭仿真、导航和雷达驱动后，再由使用者安排重启。
+本版本生成的 `boot-order-*/restore.sh` 会恢复安装前的启用状态：原为 disabled 时保持禁用，
+enabled 时恢复启用，enabled-runtime 时只恢复运行时启用；static、indirect 等状态只解除屏蔽。
+原为 masked 或 masked-runtime 时不重复修改；无法识别原状态时会在改动前停止。
+恢复后，下次启动是否等待取决于原来的启用状态和依赖。旧版本已经生成的回退脚本不会自动更新，
+使用旧备份时应结合其中的 before.json 核对，不能直接认为它具备本版本的状态恢复行为。
 
 已有 GMK 先前验证：接雷达网线重启约 19 秒自动连上保存的 Wi-Fi，有线 IP 和雷达通信保持。
 这些系统配置不随 ROS 编译自动生效；部署到另一台机器需先确认其网口用途与启动依赖。

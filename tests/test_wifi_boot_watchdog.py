@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WatchdogTest(unittest.TestCase):
-    def run_case(self, uptime, ready, connected=False, mode='', busy_age=None):
+    def run_case(self, uptime, ready, connected=False, mode='', busy_age=None, localized=False):
         with tempfile.TemporaryDirectory(prefix='gmk-wifi-test-') as directory:
             root = Path(directory)
             commands = root/'bin'
@@ -21,7 +21,16 @@ class WatchdogTest(unittest.TestCase):
                 p.write_text('#!/bin/bash\n'+body+'\n')
                 p.chmod(0o755)
             command('systemctl', 'printf "%s\\n" "$FAKE_READY"')
-            command('nmcli', 'printf "wlp1s0:%s\\n" "$FAKE_STATE"')
+            command('nmcli', '''
+if [ "$FAKE_LOCALIZED" = 1 ] && [ "${LC_ALL:-}" != C ]; then
+  if [ "$FAKE_STATE" = connected ]; then
+    echo 'wlp1s0:已连接'
+  else
+    echo 'wlp1s0:已断开'
+  fi
+else
+  printf "wlp1s0:%s\\n" "$FAKE_STATE"
+fi''')
             command('logger', ':')
             command('date', 'echo 1000')
             command('ap', 'echo AP >> "$FAKE_CALLS"')
@@ -36,7 +45,10 @@ class WatchdogTest(unittest.TestCase):
                 script = script.replace(old,str(new))
             env = dict(os.environ, PATH=str(commands)+':/usr/bin:/bin',
                        FAKE_READY=str(ready), FAKE_STATE='connected' if connected else 'disconnected',
-                       FAKE_CALLS=str(calls))
+                       FAKE_CALLS=str(calls), FAKE_LOCALIZED=str(int(localized)))
+            if localized:
+                env.pop('LC_ALL', None)
+                env['LANG'] = 'zh_CN.UTF-8'
             r = subprocess.run(['bash','-s'],input=script,text=True,env=env,capture_output=True)
             self.assertEqual(r.returncode,0,r.stderr)
             return calls.exists()
@@ -51,6 +63,12 @@ class WatchdogTest(unittest.TestCase):
 
     def test_existing_client_or_ap_is_preserved(self):
         self.assertFalse(self.run_case(600,125740760,connected=True))
+
+    def test_localized_connected_state_does_not_trigger_ap(self):
+        self.assertFalse(self.run_case(600,125740760,connected=True,localized=True))
+
+    def test_localized_disconnected_state_still_triggers_ap(self):
+        self.assertTrue(self.run_case(600,125740760,localized=True))
 
     def test_manual_off_and_provisioning_lock_are_respected(self):
         self.assertFalse(self.run_case(600,125740760,mode='off'))
