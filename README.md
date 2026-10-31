@@ -1,8 +1,8 @@
 # 北极熊哨兵仿真与导航
 
-本仓库包含单 MID360 仿真导航源码：Ubuntu 22.04、ROS 2 Humble、Gazebo Fortress，15 个上游 ROS 仓库、项目自有的 `pb_nav_decision` 与 `pb_chassis_serial` 包，以及 Livox-SDK2 和 small_gicp 源码。仿真导航和简易决策功能已运行验证；实机雷达收发与驱动退出已有 GMK 短时验证记录，当前整合版本的整车定位导航仍需验收。
+本仓库包含单 MID360 仿真导航源码：Ubuntu 22.04、ROS 2 Humble、Gazebo Fortress，15 个上游 ROS 仓库、项目自有的 `pb_nav_decision` 与 `pb_chassis_serial` 包，以及 Livox-SDK2 和 small_gicp 源码。仿真导航和简易决策功能已运行验证；当前工作区在源电脑上已由使用者确认实机在线建图与 RViz 目标导航可用，GMK N100 上的整车导航待迁移验证。
 
-**新机器不能只 `git clone` 就启动：需要安装系统依赖、编译，并单独提供 PCD。** 以下教程从 Ubuntu 22.04 x86_64 桌面环境开始，不依赖原作者的用户名或绝对路径。建议内存至少 16 GB、有可用 OpenGL 图形环境和足够磁盘空间，首次编译并行度设为 2。
+**新机器需要安装系统依赖并编译；先验点云定位还需要单独提供 PCD，`slam:=True` 在线建图不需要 PCD。** 以下教程从 Ubuntu 22.04 x86_64 桌面环境开始。桌面仿真建议至少 16 GB 内存和可用 OpenGL；8 GB N100 的无界面实机部署及笔记本无线 RViz 见 [GMK_HEADLESS_DEPLOYMENT.md](GMK_HEADLESS_DEPLOYMENT.md)。
 
 ## 1. 安装 ROS 2 Humble
 
@@ -94,7 +94,7 @@ cd "$PB_ROOT"
 bash scripts/build_all.sh
 ```
 
-脚本会把两个库安装到系统 `/usr/local`，因此会请求 sudo 权限。它默认使用 Release 编译和 2 路并行；内存较少时可显式降低并行度：
+脚本会把两个库安装到系统 `/usr/local`，因此会请求 sudo 权限。它默认使用 Release 编译；`BUILD_JOBS` 控制每个包内部的编译任务数，`COLCON_JOBS` 控制同时构建的 ROS 包数，两者默认均为 2。8 GB N100 使用单包、单编译任务：
 
 ```bash
 BUILD_JOBS=1 COLCON_JOBS=1 bash scripts/build_all.sh
@@ -110,7 +110,7 @@ bash scripts/build_all.sh --clean
 
 ```bash
 source "$PB_ROOT/scripts/env.sh"
-source "$PB_ROOT/install/setup.bash"
+source "$PB_ROOT/install/local_setup.bash"
 ```
 
 脚本内部使用的安装检查命令如下；`ldd` 输出不应包含 `not found`：
@@ -160,7 +160,7 @@ colcon --log-base "$PB_ROOT/log" build \
 source "$PB_ROOT/install/setup.bash"
 ```
 
-应识别并完成 30 个 ROS 包。部分包提示未使用 `ROS_EDITION`、`DISTRO_ROS` 等 CMake 参数属于警告；以是否有 Failed/Aborted 包判断构建是否成功。不要运行 Livox 原始 `build.sh`，以免清空工作区构建目录。
+应识别并完成 31 个 ROS 包。部分包提示未使用 `ROS_EDITION`、`DISTRO_ROS` 等 CMake 参数属于警告；以是否有 Failed/Aborted 包判断构建是否成功。不要运行 Livox 原始 `build.sh`，以免清空工作区构建目录。
 
 ## 6. 启动仿真与导航
 
@@ -253,12 +253,14 @@ bash scripts/start_sim_decision.sh mode:=decision hp_source:=referee
 - Python 导入异常：退出 Conda，使用 `/usr/bin/python3`；不要混用 ROS1 环境。
 - 无点云/仿真不前进：确认 Gazebo 已播放，检查 `/clock` 和 `/red_standard_robot1/livox/lidar`。
 - 地图加载失败：检查 PCD 文件、地图名称和启动参数；PCD 不在 Git 仓库中。
-- 内存不足：将两个库的 `--parallel`、ROS 的 `--parallel-workers` 和 `CMAKE_BUILD_PARALLEL_LEVEL` 都改为 1。
+- 内存不足：使用 `BUILD_JOBS=1 COLCON_JOBS=1 bash scripts/build_all.sh`，脚本同时限制库、ROS 包内部及包之间的并行度。
 - 无先验地图测试使用 `slam:=True` 在线建图；地图仅保存在本地 `runtime/maps`，PCD 和运行地图均不进入仓库。
 
 ## 实机范围与许可
 
-实机目标为华硕 NUC 13、Ubuntu 22.04 x86_64、单 MID360。雷达 JSON 当前写入电脑接收 IP `192.168.1.50` 和雷达 IP `192.168.1.121`；NUC 网卡地址与雷达 TF 外参仍须现场核对。实机迁移步骤见 [HARDWARE_MIGRATION.md](HARDWARE_MIGRATION.md)。
+当前迁移目标为 GMK N100、Ubuntu 22.04.5 x86_64、8 GB 内存、无桌面环境、单 MID360。雷达 JSON 当前写入电脑接收 IP `192.168.1.50` 和雷达 IP `192.168.1.121`；目标机网卡名仍须核对。传感器与协议说明见 [HARDWARE_MIGRATION.md](HARDWARE_MIGRATION.md)，本次迁移操作见 [GMK_HEADLESS_DEPLOYMENT.md](GMK_HEADLESS_DEPLOYMENT.md)。
+
+实机 launch 的雷达网络检查默认使用 `enp3s0`，可通过 `lidar_interface` 指定实际网卡；例如雷达接在 `enp5s0` 时，在启动命令中添加 `lidar_interface:=enp5s0`。该参数只选择检查的网卡，不会配置 IP；所选网卡仍须具备 JSON 中的电脑接收 IP 且网线链路就绪，否则雷达驱动不会启动，后续可能持续提示 `odom` 与机器人 TF 不连通。
 
 实机 Nav2 最终输出 `geometry_msgs/msg/Twist` 到命名空间下的 `cmd_vel`，由项目维护的 `pb_chassis_serial` 桥接到电控串口；实机 launch 默认关闭该桥接。`rmoss_base` 的云台示例不是导航底盘驱动。接入实车前需核对协议、速度方向和模式位；当前桥接在命令超时后发送 `vx=0, vy=0, wz=3.14, spin_mode=1`，需要与电控确认自转与停止的语义。
 

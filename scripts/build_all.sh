@@ -14,8 +14,9 @@ usage() {
 Usage: scripts/build_all.sh [--clean]
 
 Builds and installs the bundled Livox-SDK2 and small_gicp, then builds all
-ROS 2 packages in this workspace. Set BUILD_JOBS and COLCON_JOBS to adjust
-parallelism. --clean removes only generated ROS build, install, and log dirs.
+ROS 2 packages in this workspace. BUILD_JOBS limits compiler jobs per package;
+COLCON_JOBS limits simultaneous packages. Both default to 2. --clean removes
+only generated ROS build, install, and log dirs.
 EOF
 }
 
@@ -39,11 +40,19 @@ command -v cmake >/dev/null || die "cmake is not installed"
 command -v colcon >/dev/null || die "colcon is not installed"
 
 mkdir -p "$PB_ROOT/runtime"/{tmp,cache,config,data,ros,ros_logs,colcon}
+# ROS setup scripts read optional unset variables; suspend nounset while sourcing them.
+set +u
 source "$PB_ROOT/scripts/env.sh"
+set -u
 
 if ! [[ "$BUILD_JOBS" =~ ^[1-9][0-9]*$ && "$COLCON_JOBS" =~ ^[1-9][0-9]*$ ]]; then
   die "BUILD_JOBS and COLCON_JOBS must be positive integers"
 fi
+
+# colcon otherwise adds its own CPU-count-based make parallelism. Set both
+# controls after env.sh so BUILD_JOBS also applies to ROS package compilation.
+export CMAKE_BUILD_PARALLEL_LEVEL="$BUILD_JOBS"
+export MAKEFLAGS="${MAKEFLAGS:+$MAKEFLAGS }-j$BUILD_JOBS -l$BUILD_JOBS"
 
 if (( CLEAN )); then
   printf '%s\n' 'Removing generated ROS build, install, and log directories...'
@@ -100,4 +109,4 @@ colcon --log-base "$PB_ROOT/log" build \
 
 [[ -f "$PB_ROOT/install/setup.bash" ]] || die "ROS workspace build completed without install/setup.bash"
 printf '\nBuild complete. In each new terminal run:\n  source %q\n  source %q\n' \
-  "$PB_ROOT/scripts/env.sh" "$PB_ROOT/install/setup.bash"
+  "$PB_ROOT/scripts/env.sh" "$PB_ROOT/install/local_setup.bash"

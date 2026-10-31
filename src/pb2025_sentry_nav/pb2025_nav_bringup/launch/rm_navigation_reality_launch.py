@@ -47,6 +47,7 @@ def generate_launch_description():
     rviz_config_file = LaunchConfiguration("rviz_config_file")
     use_robot_state_pub = LaunchConfiguration("use_robot_state_pub")
     use_rviz = LaunchConfiguration("use_rviz")
+    lidar_interface = LaunchConfiguration("lidar_interface")
     use_chassis_serial = LaunchConfiguration("use_chassis_serial")
     chassis_serial_port = LaunchConfiguration("chassis_serial_port")
     chassis_serial_baudrate = LaunchConfiguration("chassis_serial_baudrate")
@@ -138,6 +139,12 @@ def generate_launch_description():
         "use_rviz", default_value="True", description="Whether to start RVIZ"
     )
 
+    declare_lidar_interface_cmd = DeclareLaunchArgument(
+        "lidar_interface",
+        default_value="enp3s0",
+        description="Network interface connected to the LiDAR; must have the receiver IP configured in its JSON",
+    )
+
     declare_use_chassis_serial_cmd = DeclareLaunchArgument(
         "use_chassis_serial",
         default_value="False",
@@ -188,7 +195,9 @@ def generate_launch_description():
         prefix=[
             sys.executable + " "
             + shlex.quote(os.path.join(launch_dir, "gmk_lidar_network_gate.py"))
-            + " -- "
+            + " --interface ",
+            lidar_interface,
+            " -- ",
         ],
         namespace=namespace,
         parameters=[configured_params],
@@ -261,6 +270,7 @@ def generate_launch_description():
     ld.add_action(declare_rviz_config_file_cmd)
     ld.add_action(declare_use_robot_state_pub_cmd)
     ld.add_action(declare_use_rviz_cmd)
+    ld.add_action(declare_lidar_interface_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_use_chassis_serial_cmd)
     ld.add_action(declare_chassis_serial_port_cmd)

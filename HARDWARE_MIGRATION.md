@@ -1,11 +1,11 @@
 # 单 MID360 实机迁移
 
-本文对应当前工作区源码。仿真导航、RViz 手动目标和仿真血量决策已验证；NUC 上的雷达定位、底盘协议桥接和实机自主导航仍需分阶段验证。
+本文说明传感器、TF 与底盘协议。源电脑上的实机在线建图与 RViz 目标导航已由使用者验证；GMK N100 的无界面迁移、Git 版本部署和笔记本无线显示操作见 [GMK_HEADLESS_DEPLOYMENT.md](GMK_HEADLESS_DEPLOYMENT.md)。
 
 ## 目标设备与配置
 
-- 目标主机：华硕 NUC 13，Ubuntu 22.04 x86_64，ROS 2 Humble。
-- 单台 MID360：JSON 当前配置电脑接收地址 `192.168.1.50`、雷达地址 `192.168.1.121`。先确认 NUC 有线网卡实际地址；若不同，需同步修改雷达 JSON 中的所有 host IP 字段和网卡配置。
+- 目标主机：GMK N100，Ubuntu 22.04.5 x86_64，ROS 2 Humble，7.5 GiB 内存，无桌面环境。
+- 单台 MID360：JSON 当前配置电脑接收地址 `192.168.1.50`、雷达地址 `192.168.1.121`。先确认目标机有线网卡实际地址；若不同，需同步修改雷达 JSON 中的所有 host IP 字段和网卡配置。
 - 雷达在云台上，雷达相对 `gimbal_yaw` 固定。点云 frame 为 `front_mid360`，实机参数使用 Livox `CustomMsg`（`xfer_format=1`、`lidar_type=1`、`scan_line=4`）。
 - 实机 Point-LIO 的 `gravity`、`gravity_init` 当前都设为 `[0, 0, +9.81]`。这只是当前配置值；实测时需按 IMU 方向确认，不能仅凭雷达倒装推断重力向量。
 
@@ -15,30 +15,30 @@
 - `src/pb2025_sentry_nav/pb2025_nav_bringup/config/reality/nav2_params.yaml`
 - `src/pb2025_sentry_nav/pb2025_nav_bringup/launch/rm_navigation_reality_launch.py`
 
-## 1. 在 NUC 上准备工作区
+## 1. 在目标机上准备工作区
 
-按 [README.md](README.md) 从零安装依赖、构建两个独立 C++ 库和 ROS 工作区。不要把当前电脑的 `build/`、`install/` 复制给 NUC；这些目录包含本机路径和构建环境信息。PCD 被 Git 忽略，需另行传到匹配地图的配置路径。
+按 [README.md](README.md) 安装缺少的依赖，再用 `BUILD_JOBS=1 COLCON_JOBS=1 bash scripts/build_all.sh` 构建两个 C++ 库和 ROS 工作区。不要把当前电脑的 `build/`、`install/` 复制给目标机；这些目录包含本机路径。PCD 被 Git 忽略，先验定位时需另行提供；本次 `slam:=True` 不需要 PCD。
 
 每个终端加载环境：
 
 ```bash
 cd ~/beijixiong
 source scripts/env.sh
-source install/setup.bash
+source install/local_setup.bash
 ```
 
-实机雷达 JSON 中 host IP 应与 NUC 连接 MID360 的网卡地址一致。IP 可 ping 通只说明 IP 层连通；是否收到雷达数据要看 ROS 话题。
+实机雷达 JSON 中 host IP 应与目标机连接 MID360 的网卡地址一致。IP 可 ping 通只说明 IP 层连通；是否收到雷达数据要看 ROS 话题。
 
 当前地址同时对应已有的 GMK 测试连接：电脑接收 IP `192.168.1.50`，雷达 IP `192.168.1.121`。换设备必须根据实际地址更新所有非空 host IP 和 lidar_configs.ip。电脑网卡静态 IP 配置属于系统设置，不能只修改 JSON。
 
-实机 launch 会等待 enp3s0 链路及 JSON 中的接收 IP 就绪，最多 30 秒，再执行雷达驱动；SDK 保持仓库的 1.4.3，日志内部符号与 ROS 隔离。更换有线网卡时同步调整网口助手的 interface 设置。
+实机 launch 会等待 `lidar_interface` 指定的网卡链路及 JSON 中的接收 IP 就绪，最多 30 秒，再执行雷达驱动；网卡默认 `enp3s0`。SDK 保持仓库的 1.4.3，日志内部符号与 ROS 隔离。
 
 ## 2. 单独验证雷达和 IMU
 
 先关闭 Gazebo 和仿真导航，避免同一 ROS Domain 中出现仿真和实机同名话题。可单独启动 Livox 驱动：
 
 ```bash
-python3 "$PB_ROOT/src/pb2025_sentry_nav/pb2025_nav_bringup/launch/gmk_lidar_network_gate.py" -- \
+python3 "$PB_ROOT/src/pb2025_sentry_nav/pb2025_nav_bringup/launch/gmk_lidar_network_gate.py" --interface enp3s0 -- \
 ros2 run livox_ros_driver2 livox_ros_driver2_node --ros-args \
   -r __ns:=/red_standard_robot1 \
   -p xfer_format:=1 -p multi_topic:=0 -p data_src:=0 \
@@ -84,11 +84,12 @@ python3 scripts/verify_lidar_shutdown.py
 ```bash
 cd ~/beijixiong
 source scripts/env.sh
-source install/setup.bash
+source install/local_setup.bash
 ros2 launch pb2025_nav_bringup rm_navigation_reality_launch.py \
   namespace:=red_standard_robot1 \
   slam:=True use_sim_time:=False \
   use_robot_state_pub:=True use_composition:=False \
+  use_rviz:=False lidar_interface:=enp3s0 \
   use_chassis_serial:=False \
   chassis_serial_port:=/dev/ttyACM0 \
   chassis_serial_baudrate:=1152000
@@ -108,10 +109,10 @@ Nav2 的速度经平滑和 `fake_vel_transform` 转换后发布到 namespace 下
 
 ## 验收顺序
 
-1. NUC 能稳定接收 MID360 点云和 IMU。
+1. 目标机能稳定接收 MID360 点云和 IMU。
 2. TF 连通，点云与云台、底盘坐标关系正确；Point-LIO 静止和低速移动时输出连续。
 3. 无先验地图时可持续 SLAM 建图；有先验地图时 small_gicp 与二维地图坐标一致。
 4. 确认电控桥接后，先检查速度话题，再在受控场地验证低速方向、旋转和停驶行为。
 5. RViz 目标导航通过后，再接入决策节点和真实血量输入；持续运行至少 7 分钟，并覆盖预期的底盘临时断电场景。
 
-本仓库包含基于当前电控协议的实机底盘 `cmd_vel` 协议桥接；NUC 上的完整实机导航仍需按上述顺序验收。
+本仓库包含基于当前电控协议的实机底盘 `cmd_vel` 协议桥接；GMK 上的完整实机导航仍需按上述顺序验收。
